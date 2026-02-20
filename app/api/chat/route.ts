@@ -1,21 +1,89 @@
 import OpenAI from "openai";
+import dotenv from "dotenv";
 
-const {
-  ASTRA_DB_NAMESPACE,
-  ASTRA_DB_COLLECTION,
-  ASTRA_DB_API_ENDPOINT,
-  ASTRA_DB_APPLICATION_TOKEN,
-  OPENAI_API_KEY,
-} = process.env;
+export const runtime = "nodejs";
+dotenv.config();
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
+type IncomingMessage = {
+  role?: string;
+  content?: unknown;
+  parts?: Array<{ type?: string; text?: unknown }>;
+};
+
+type SupportedChatMessage =
+  | OpenAI.Chat.Completions.ChatCompletionUserMessageParam
+  | OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam
+  | OpenAI.Chat.Completions.ChatCompletionSystemMessageParam;
+
+function extractMessageText(message: IncomingMessage): string {
+  if (typeof message?.content === "string") {
+    return message.content;
+  }
+
+  if (Array.isArray(message?.parts)) {
+    return message.parts
+      .filter((part) => part?.type === "text" && typeof part?.text === "string")
+      .map((part) => part.text as string)
+      .join("\n")
+      .trim();
+  }
+
+  return "";
+}
 
 export async function POST(req: Request) {
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      return new Response("OPENAI_API_KEY is not configured", { status: 500 });
+    }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
     const { messages } = await req.json();
-    const latestMessage = messages[messages?.length - 1]?.content;
+    const normalizedMessages: IncomingMessage[] = Array.isArray(messages) ? messages : [];
+    const latestUserMessage = [...normalizedMessages]
+      .reverse()
+      .find((message) => message?.role === "user");
+    const latestMessage = extractMessageText(latestUserMessage ?? {});
+
+    if (!latestMessage) {
+      return new Response("Request is missing user message text", { status: 400 });
+    }
+
+    const chatHistory = normalizedMessages.reduce<SupportedChatMessage[]>((acc, message) => {
+        const content = extractMessageText(message);
+        const role = message?.role;
+
+        if (!content) {
+          return acc;
+        }
+
+        if (role === "user") {
+          acc.push({
+            role: "user",
+            content,
+          } satisfies OpenAI.Chat.Completions.ChatCompletionUserMessageParam);
+          return acc;
+        }
+        if (role === "assistant") {
+          acc.push({
+            role: "assistant",
+            content,
+          } satisfies OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
+          return acc;
+        }
+        if (role === "system") {
+          acc.push({
+            role: "system",
+            content,
+          } satisfies OpenAI.Chat.Completions.ChatCompletionSystemMessageParam);
+          return acc;
+        }
+
+        return acc;
+      }, []);
 
     let docContext = "";
 
@@ -26,15 +94,26 @@ export async function POST(req: Request) {
       encoding_format: "float",
     });
 
+    const hasAstraConfig = Boolean(
+      process.env.ASTRA_DB_API_ENDPOINT &&
+        process.env.ASTRA_DB_NAMESPACE &&
+        process.env.ASTRA_DB_COLLECTION &&
+        process.env.ASTRA_DB_APPLICATION_TOKEN
+    );
+
     try {
+      if (!hasAstraConfig) {
+        throw new Error("Astra env vars are missing");
+      }
+
       // Call Astra REST API for vector search
       const response = await fetch(
-        `${ASTRA_DB_API_ENDPOINT}/api/json/v1/${ASTRA_DB_NAMESPACE}/${ASTRA_DB_COLLECTION}?vector=true`,
+        `${process.env.ASTRA_DB_API_ENDPOINT}/api/json/v1/${process.env.ASTRA_DB_NAMESPACE}/${process.env.ASTRA_DB_COLLECTION}?vector=true`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-cassandra-token": ASTRA_DB_APPLICATION_TOKEN,
+            "x-cassandra-token": process.env.ASTRA_DB_APPLICATION_TOKEN as string,
           },
           body: JSON.stringify({
             vector: embedding.data[0].embedding,
@@ -55,7 +134,7 @@ export async function POST(req: Request) {
       docContext = "";
     }
 
-    const systemPrompt = {
+    const systemPrompt: OpenAI.Chat.Completions.ChatCompletionSystemMessageParam = {
       role: "system",
       content: `You are an AI assistant who knows everything about Formula One.
 Use the below context to augment what you know about Formula One racing.
@@ -77,9 +156,9 @@ QUESTION: ${latestMessage}
     };
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4o-mini",
       stream: true,
-      messages: [systemPrompt, ...messages],
+      messages: [systemPrompt, ...chatHistory],
     });
 
     const encoder = new TextEncoder();
@@ -102,6 +181,22 @@ QUESTION: ${latestMessage}
     });
   } catch (err) {
     console.error("Error handling request:", err);
-    return new Response("Internal Server Error", { status: 500 });
+    const status =
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      typeof (err as { status?: unknown }).status === "number"
+        ? ((err as { status: number }).status ?? 500)
+        : 500;
+
+    if (status === 429) {
+      return new Response(
+        "OpenAI quota exceeded. Add billing/credits to your OpenAI project, then retry.",
+        { status: 429 }
+      );
+    }
+
+    const message = err instanceof Error ? err.message : "Internal Server Error";
+    return new Response(message, { status });
   }
 }

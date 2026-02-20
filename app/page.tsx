@@ -1,31 +1,35 @@
 "use client";
 import Image from "next/image";
+import { useState } from "react";
 import f1GPTLogo from "./assests/formula_1-logo-brandlogos.net_-512x512.png";
-import { useChat } from "ai/react";
+import { useChat } from "@ai-sdk/react";
+import { TextStreamChatTransport } from "ai";
 import Bubble from "./components/Bubble";
 import PromptSuggestionsRow from "./components/PromptSuggestionsRow";
 import LoadingBubble from "./components/LoadingBubble";
 
 const Home = () => {
-  const {
-    messages,
-    input,
-    handleInputChange,
-    handleSubmit,
-    isLoading,
-    append,
-  } = useChat({
-    api: "/api/chat",
+  const { messages, sendMessage, status } = useChat({
+    transport: new TextStreamChatTransport({
+      api: "/api/chat",
+    }),
   });
+  const [input, setInput] = useState("");
+  const isLoading = status === "submitted" || status === "streaming";
 
   const noMessages = !messages || messages.length === 0;
 
   const handlePrompt = (promptText) => {
-    append({
-      id: crypto.randomUUID(),
-      content: promptText,
-      role: "user",
-    });
+    sendMessage({ text: promptText });
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return;
+
+    sendMessage({ text: trimmedInput });
+    setInput("");
   };
 
   return (
@@ -53,7 +57,7 @@ const Home = () => {
       <form onSubmit={handleSubmit}>
         <input
           className="question-box"
-          onChange={handleInputChange}
+          onChange={(event) => setInput(event.target.value)}
           value={input}
           placeholder="Ask me something..."
         />
