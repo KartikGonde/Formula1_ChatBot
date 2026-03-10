@@ -1,20 +1,18 @@
-import { title } from "process"
-import "./global.css"
+import type { Metadata } from "next";
+import "./global.css";
 
-export const metadata = {
-    title: "F1GPT",
-    description: "Fast cars even fasters answers to your Formula One questions!"
-}
+export const metadata: Metadata = {
+  title: "F1GPT",
+  description:
+    "Fast cars, even faster answers to your Formula One questions!",
+};
 
-const RootLayout = ({ children }) => {
-    return (
-        <html lang="en">
-            <body>
-                {children}
-            </body>
-        </html>
-    )
-}
+const RootLayout = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+};
 
-
-export default RootLayout
+export default RootLayout;

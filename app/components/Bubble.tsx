@@ -1,4 +1,4 @@
-const Bubble = ({ message }) => {
+const Bubble = ({ message }: { message: any }) => {
   const { content, role, parts } = message;
 
   const renderedContent =
@@ -6,13 +6,16 @@ const Bubble = ({ message }) => {
       ? content
       : Array.isArray(parts)
         ? parts
-            .filter((part) => part?.type === "text" && typeof part?.text === "string")
-            .map((part) => part.text)
+            .filter(
+              (part: any) =>
+                part?.type === "text" && typeof part?.text === "string"
+            )
+            .map((part: any) => part.text)
             .join("\n")
         : "";
 
   return (
-    <div className={`${role} bubble`}>
+    <div className={`bubble ${role}`}>
       {renderedContent}
     </div>
   );
