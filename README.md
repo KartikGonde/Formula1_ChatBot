@@ -3,7 +3,7 @@
 Your personal race engineer—powered by Retrieval-Augmented Generation (RAG), OpenAI, and Datastax Astra DB.  
 Ask anything about Formula One and get intelligent, up-to-date responses.
 
-<img src="final-ss.png" alt="F1GPT Screenshot" width="700"/>
+<img src="SS.png" alt="F1GPT Screenshot" width="700"/>
 
 ---
 
